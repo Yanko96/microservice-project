@@ -16,6 +16,7 @@ RUN apt-get update \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# 添加启动脚本
 COPY start.sh .
 RUN chmod 755 start.sh && \
     ls -la start.sh && \

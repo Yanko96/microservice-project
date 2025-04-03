@@ -1,0 +1,51 @@
+# FastAPI Framework
+fastapi>=0.95.0
+uvicorn>=0.22.0
+
+# Database ORM
+sqlalchemy>=2.0.0
+alembic>=1.10.0
+psycopg2-binary>=2.9.5
+
+# JWT Authentication
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+python-multipart>=0.0.5
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# CORS
+fastapi-cors>=0.0.6
+
+# Pydantic
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+email-validator>=2.0.0
+
+# Redis connection (for caching)
+redis>=4.5.0
+
+# Kafka client (for event processing)
+aiokafka>=0.8.0
+
+# Elasticsearch client (for search)
+elasticsearch>=8.6.0
+
+# Logging
+loguru>=0.7.0
+
+# Object Storage
+minio>=7.1.0
+
+# HTTP client
+httpx>=0.24.0
+
+# Content validation
+python-magic>=0.4.27
+
+# Testing
+pytest>=7.3.0
+
+asyncpg
+aiohttp

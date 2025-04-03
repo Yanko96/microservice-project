@@ -17,6 +17,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./docker-config/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
     networks:
       - app_network
     healthcheck:  # ✅ 确保 PostgreSQL 可用
@@ -83,6 +84,26 @@ services:
     networks:
       - app_network
 
+  minio:
+    image: minio/minio
+    container_name: minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"  # API
+      - "9001:9001"  # 控制台
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   nginx:
     image: nginx:latest
     container_name: api_gateway
@@ -93,17 +114,40 @@ services:
     depends_on:
       user-service:
         condition: service_healthy  # ✅ 确保 `user-service` 运行后才启动
+      post-service:
+        condition: service_healthy  # ✅ 确保 `post-service` 运行后才启动
+      notification-service:
+        condition: service_healthy  # ✅ 确保 `notification-service` 运行后才启动
     networks:
       - app_network
 
   user-service:
-    build: ./user-service
+    build:
+      context: ./user-service
+      dockerfile: Dockerfile
     container_name: user-service
+    restart: always
     environment:
-      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/social_platform
-      - SPRING_DATASOURCE_USERNAME=admin
-      - SPRING_DATASOURCE_PASSWORD=password
-      - SPRING_JPA_DATABASE_PLATFORM=org.hibernate.dialect.PostgreSQLDialect  # ✅ 防止 Hibernate 连接错误
+      - DATABASE_URL=postgresql://admin:password@postgres:5432/social_platform_users
+      - SECRET_KEY=mysecretkey
+      - ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=1440
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - KAFKA_TOPIC_LOGS=service.logs
+      - KAFKA_TOPIC_NOTIFICATIONS=user.notifications
+      - LOG_LEVEL=INFO
+      - CORS_ORIGINS=["*"]
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - MINIO_SECURE=false
+      - MINIO_USER_BUCKET=user-content
+      - GITHUB_CLIENT_ID=your_github_client_id
+      - GITHUB_CLIENT_SECRET=your_github_client_secret
+      - GOOGLE_CLIENT_ID=your_google_client_id
+      - GOOGLE_CLIENT_SECRET=your_google_client_secret
     depends_on:
       postgres:
         condition: service_healthy  # ✅ 确保 `postgres` 可用
@@ -111,13 +155,106 @@ services:
         condition: service_started
       kafka:
         condition: service_started
+      minio:
+        condition: service_healthy
     networks:
       - app_network
     healthcheck:  # ✅ 确保 `user-service` 启动成功
-      test: ["CMD", "curl", "-f", "http://localhost:8081/actuator/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      retries: 5
+
+  post-service:
+    build:
+      context: ./post-service
+      dockerfile: Dockerfile
+    container_name: post-service
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql://admin:password@postgres:5432/social_platform_posts
+      - API_V1_STR=/api/v1
+      - JWT_SECRET_KEY=mysecretkey
+      - JWT_ALGORITHM=HS256
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - KAFKA_TOPIC_POSTS=social.posts
+      - KAFKA_TOPIC_COMMENTS=social.comments
+      - KAFKA_TOPIC_REACTIONS=social.reactions
+      - KAFKA_TOPIC_NOTIFICATIONS=user.notifications
+      - KAFKA_TOPIC_LOGS=service.logs
+      - ELASTICSEARCH_HOST=elasticsearch
+      - ELASTICSEARCH_PORT=9200
+      - ELASTICSEARCH_INDEX_POSTS=posts
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - MINIO_SECURE=false
+      - MINIO_POST_BUCKET=post-content
+      - LOG_LEVEL=INFO
+      - USER_SERVICE_BASE_URL=http://user-service:8000/api/v1
+      - CORS_ORIGINS=["*"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      kafka:
+        condition: service_started
+      minio:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_started
+      user-service:
+        condition: service_healthy
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      retries: 5
+
+  notification-service:
+    build:
+      context: ./notification-service
+      dockerfile: Dockerfile
+    container_name: notification-service
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql://admin:password@postgres:5432/social_platform_notifications
+      - API_V1_STR=/api/v1
+      - JWT_SECRET_KEY=mysecretkey
+      - JWT_ALGORITHM=HS256
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_CHANNEL=notifications
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - KAFKA_TOPIC_NOTIFICATIONS=user.notifications
+      - KAFKA_TOPIC_POSTS=social.posts
+      - KAFKA_TOPIC_COMMENTS=social.comments
+      - KAFKA_TOPIC_REACTIONS=social.reactions
+      - KAFKA_CONSUMER_GROUP=notification-service-group
+      - LOG_LEVEL=INFO
+      - USER_SERVICE_BASE_URL=http://user-service:8000/api/v1
+      - WEBSOCKET_PATH=/ws/notifications
+      - CORS_ORIGINS=["*"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      kafka:
+        condition: service_started
+      user-service:
+        condition: service_healthy
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
       retries: 5
 
 volumes:
   postgres_data:
   elastic_data:
+  minio_data:
