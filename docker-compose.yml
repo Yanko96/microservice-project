@@ -114,7 +114,7 @@ services:
     networks:
       - app_network
     healthcheck:  # ✅ 确保 `user-service` 启动成功
-      test: ["CMD", "curl", "-f", "http://localhost:8081/actuator/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
       interval: 10s
       retries: 5
 
