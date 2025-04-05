@@ -49,6 +49,7 @@ async def create_post(
     post_in: PostCreate = None,
     content: str = Form(None),
     visibility: Visibility = Form(Visibility.PUBLIC),
+    media_type: MediaType = Form(MediaType.NONE),
     location: str = Form(None),
     tag_names: str = Form(""),
     files: List[UploadFile] = File(None),
@@ -72,13 +73,15 @@ async def create_post(
         content=post_data.get("content"),
         visibility=post_data.get("visibility", Visibility.PUBLIC),
         location=post_data.get("location"),
-        media_type=MediaType.NONE,
+        media_type=post_data.get("media_type", MediaType.NONE),
         media_urls=[]
     )
+    print("**************", post.visibility)
+    print("**************", post.media_type)
 
     if files and any(file.filename for file in files):
         file_list = []
-        media_type = None
+        media_type = post_data.get("media_type", MediaType.NONE)
 
         for file in files:
             if not file.filename:
@@ -97,12 +100,13 @@ async def create_post(
 
             object_name = f"user_{current_user['id']}/post_{datetime.now().strftime('%Y%m%d%H%M%S')}_{len(file_list)}"
             file_url = await storage.upload_file(file=file, folder="posts", object_name=object_name, tags={"user_id": str(current_user["id"])})
-            file_info = {"url": file_url, "type": media_type.value}
+            file_info = {"url": file_url, "type": media_type}
             file_list.append(file_info)
 
         if file_list:
             post.media_type = media_type
             post.media_urls = file_list
+        print("**********************", media_type)
 
     if "tag_names" in post_data and post_data["tag_names"]:
         for tag_name in post_data["tag_names"]:
@@ -116,160 +120,6 @@ async def create_post(
             else:
                 tag.post_count += 1
             post.tags.append(tag)
-
-    db.add(post)
-    db.commit()
-    db.refresh(post)
-
-    return build_post_schema(post, user_info=current_user)
-
-
-@router.get("/", response_model=PostPage)
-async def read_posts(
-    db: Session = Depends(get_db),
-    pagination: Dict[str, int] = Depends(get_pagination_params),
-    user_id: Optional[int] = Query(None),
-    tag: Optional[str] = Query(None),
-    visibility: Optional[Visibility] = Query(None),
-    current_user: Dict[str, Any] = Depends(get_current_user),
-    user_client: httpx.AsyncClient = Depends(get_user_service_client),
-) -> Any:
-    page = pagination["page"]
-    size = pagination["size"]
-    skip = (page - 1) * size
-
-    query = db.query(Post)
-
-    if user_id:
-        query = query.filter(Post.user_id == user_id)
-    if tag:
-        query = query.join(Post.tags).filter(Tag.name == tag)
-    if visibility:
-        if visibility == Visibility.PRIVATE and not (current_user["id"] == user_id or current_user.get("is_superuser")):
-            raise HTTPException(status_code=403, detail="无权查看私有帖子")
-        query = query.filter(Post.visibility == visibility)
-    else:
-        query = query.filter((Post.visibility == Visibility.PUBLIC) | (Post.user_id == current_user["id"]))
-
-    query = query.order_by(Post.created_at.desc())
-    total = query.count()
-    posts = query.offset(skip).limit(size).all()
-
-    user_ids = list(set(post.user_id for post in posts))
-    users = {}
-    if user_ids:
-        try:
-            response = await user_client.get("/users/batch", params={"ids": ",".join(map(str, user_ids))})
-            if response.status_code == 200:
-                users = {user["id"]: user for user in response.json()}
-        except httpx.RequestError:
-            pass
-
-    items = []
-    for post in posts:
-        reaction = db.query(Reaction).filter(Reaction.post_id == post.id, Reaction.user_id == current_user["id"]).first()
-        post_dict = build_post_schema(post, user_info=users.get(post.user_id), reaction=reaction)
-        items.append(post_dict)
-
-    pages = (total + size - 1) // size
-    return {"items": items, "total": total, "page": page, "size": size, "pages": pages}
-
-
-@router.get("/{post_id}", response_model=PostDetail)
-async def read_post(
-    *,
-    db: Session = Depends(get_db),
-    post_id: int = Path(..., gt=0),
-    current_user: Dict[str, Any] = Depends(get_current_user),
-    user_client: httpx.AsyncClient = Depends(get_user_service_client),
-) -> Any:
-    post = db.query(Post).filter(Post.id == post_id).first()
-    if not post:
-        raise HTTPException(status_code=404, detail="帖子不存在")
-
-    if post.visibility != Visibility.PUBLIC and post.user_id != current_user["id"] and not current_user.get("is_superuser"):
-        raise HTTPException(status_code=403, detail="无权查看该帖子")
-
-    post.view_count += 1
-    db.commit()
-
-    user_info = None
-    try:
-        response = await user_client.get(f"/users/id/{post.user_id}")
-        if response.status_code == 200:
-            user_info = response.json()
-    except httpx.RequestError:
-        pass
-
-    reaction = db.query(Reaction).filter(Reaction.post_id == post.id, Reaction.user_id == current_user["id"]).first()
-    post_detail = build_post_schema(post, user_info=user_info, reaction=reaction)
-    return post_detail
-
-
-@router.put("/{post_id}", response_model=PostSchema)
-async def update_post(
-    *,
-    db: Session = Depends(get_db),
-    post_id: int = Path(..., gt=0),
-    post_in: PostUpdate,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-) -> Any:
-    post = db.query(Post).filter(Post.id == post_id).first()
-    if not post:
-        raise HTTPException(status_code=404, detail="帖子不存在")
-
-    if not await check_ownership(post.user_id, current_user):
-        raise HTTPException(status_code=403, detail="无权修改该帖子")
-
-    update_data = post_in.dict(exclude_unset=True)
-
-    if "tag_names" in update_data:
-        for tag in post.tags:
-            tag.post_count -= 1
-            if tag.post_count <= 0:
-                db.delete(tag)
-        post.tags = []
-
-        for tag_name in update_data["tag_names"]:
-            tag_name = tag_name.strip().lower()
-            if not tag_name:
-                continue
-            tag = db.query(Tag).filter(Tag.name == tag_name).first()
-            if not tag:
-                tag = Tag(name=tag_name, post_count=1)
-                db.add(tag)
-            else:
-                tag.post_count += 1
-            post.tags.append(tag)
-
-        del update_data["tag_names"]
-
-    for field, value in update_data.items():
-        setattr(post, field, value)
-
-    post.is_edited = True
-    db.add(post)
-    db.commit()
-    db.refresh(post)
-
-    return build_post_schema(post, user_info=current_user)
-
-
-@router.post("/{post_id}/pin", response_model=PostSchema)
-async def pin_post(
-    *,
-    db: Session = Depends(get_db),
-    post_id: int = Path(..., gt=0),
-    current_user: Dict[str, Any] = Depends(get_current_user),
-) -> Any:
-    post = db.query(Post).filter(Post.id == post_id).first()
-    if not post:
-        raise HTTPException(status_code=404, detail="帖子不存在")
-
-    if not await check_ownership(post.user_id, current_user):
-        raise HTTPException(status_code=403, detail="无权置顶该帖子")
-
-    post.is_pinned = not post.is_pinned
     db.add(post)
     db.commit()
     db.refresh(post)
