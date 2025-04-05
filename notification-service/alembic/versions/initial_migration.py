@@ -8,6 +8,7 @@ Create Date: 2023-04-05 12:00:00.000000
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
+from sqlalchemy import text, exc
 
 # revision identifiers, used by Alembic.
 revision = '9b91adc45f2e'
@@ -16,13 +17,42 @@ branch_labels = None
 depends_on = None
 
 
+def create_enum_if_not_exists(enum_name, enum_values):
+    """
+    创建枚举类型（如果不存在）
+
+    参数:
+        enum_name: 枚举类型名称
+        enum_values: 枚举值列表
+    """
+    # 连接数据库
+    conn = op.get_bind()
+    
+    # 检查枚举类型是否存在
+    check_sql = text(f"SELECT EXISTS(SELECT 1 FROM pg_type WHERE typname = '{enum_name}')")
+    exists = conn.execute(check_sql).scalar()
+    
+    if not exists:
+        # 创建枚举类型
+        values_str = ", ".join([f"'{v}'" for v in enum_values])
+        create_sql = text(f"CREATE TYPE {enum_name} AS ENUM ({values_str})")
+        conn.execute(create_sql)
+        return True
+    else:
+        return False
+
+
 def upgrade():
-    # 创建通知类型枚举
-    notification_type_enum = postgresql.ENUM(
-        'follow', 'post_like', 'post_comment', 'comment_like', 'comment_reply', 'mention', 'system', 
-        name='notificationtype'
-    )
-    notification_type_enum.create(op.get_bind())
+    # 创建通知类型枚举（如果不存在）
+    try:
+        notification_values = [
+            'follow', 'post_like', 'post_comment', 'comment_like', 
+            'comment_reply', 'mention', 'system'
+        ]
+        if not create_enum_if_not_exists('notificationtype', notification_values):
+            print("notificationtype 枚举类型已存在，跳过创建")
+    except exc.SQLAlchemyError as e:
+        print(f"创建 notificationtype 枚举类型时出错: {e}")
     
     # 创建通知表
     op.create_table(
@@ -60,4 +90,8 @@ def downgrade():
     op.drop_table('notifications')
     
     # 删除枚举类型
-    postgresql.ENUM(name='notificationtype').drop(op.get_bind())
+    conn = op.get_bind()
+    try:
+        conn.execute(text("DROP TYPE IF EXISTS notificationtype"))
+    except exc.SQLAlchemyError as e:
+        print(f"删除枚举类型时出错: {e}")
