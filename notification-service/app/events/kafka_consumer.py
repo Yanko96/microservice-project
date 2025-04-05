@@ -1,3 +1,5 @@
+# app/events/kafka_consumer.py - 更新后的文件
+
 import asyncio
 import json
 from typing import List, Dict, Any, Callable, Awaitable
@@ -5,6 +7,7 @@ from datetime import datetime
 import logging
 
 from aiokafka import AIOKafkaConsumer
+from aiokafka.errors import KafkaConnectionError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -29,59 +32,120 @@ class KafkaConsumer:
         self.consumer = None
         self.running = False
         self.should_stop = False
+        self.reconnect_delay = 5  # 初始重连延迟5秒
+        self.max_reconnect_delay = 60  # 最大重连延迟60秒
     
-    async def start(self):
-        """启动消费者"""
-        # 创建消费者
-        self.consumer = AIOKafkaConsumer(
-            *self.topics,
-            bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
-            group_id=settings.KAFKA_CONSUMER_GROUP,
-            auto_offset_reset="latest",  # latest 确保只获取新消息
-            enable_auto_commit=True,
-            value_deserializer=lambda m: json.loads(m.decode('utf-8'))
-        )
+    async def start(self, max_retries=5):
+        """
+        启动消费者，增加重试机制
         
-        await self.consumer.start()
-        self.running = True
-        logger.info(f"Kafka 消费者已启动，订阅主题: {', '.join(self.topics)}")
-        
-        # 启动消费循环
-        asyncio.create_task(self.consume_loop())
+        参数:
+            max_retries: 启动时的最大重试次数，如果小于0则无限重试
+        """
+        # 尝试连接
+        retries = 0
+        while max_retries < 0 or retries <= max_retries:
+            try:
+                # 创建消费者
+                self.consumer = AIOKafkaConsumer(
+                    *self.topics,
+                    bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
+                    group_id=settings.KAFKA_CONSUMER_GROUP,
+                    auto_offset_reset="latest",  # latest 确保只获取新消息
+                    enable_auto_commit=True,
+                    value_deserializer=lambda m: json.loads(m.decode('utf-8'))
+                )
+                
+                await self.consumer.start()
+                self.running = True
+                self.reconnect_delay = 5  # 重置重连延迟
+                logger.info(f"Kafka 消费者已启动，订阅主题: {', '.join(self.topics)}")
+                
+                # 启动消费循环
+                asyncio.create_task(self.consume_loop())
+                break
+                
+            except KafkaConnectionError as e:
+                retries += 1
+                if max_retries >= 0 and retries > max_retries:
+                    logger.error(f"无法连接到Kafka，已达最大重试次数: {str(e)}")
+                    # 不抛出异常，允许服务继续启动，只是没有Kafka功能
+                    break
+                
+                logger.warning(f"连接Kafka失败 (尝试 {retries}/{max_retries if max_retries >= 0 else '无限'}): {str(e)}")
+                logger.info(f"将在 {self.reconnect_delay} 秒后重试连接...")
+                await asyncio.sleep(self.reconnect_delay)
+                
+                # 指数退避策略
+                self.reconnect_delay = min(self.reconnect_delay * 2, self.max_reconnect_delay)
+                
+            except Exception as e:
+                logger.error(f"启动Kafka消费者时发生意外错误: {str(e)}")
+                # 不抛出异常，允许服务继续启动
+                break
     
     async def consume_loop(self):
-        """消费循环，处理消息"""
-        try:
-            while self.running and not self.should_stop:
-                try:
-                    # 获取消息
-                    async for message in self.consumer:
-                        if self.should_stop:
-                            break
-                            
-                        topic = message.topic
-                        value = message.value
-                        
-                        logger.debug(f"收到来自主题 {topic} 的消息: {value}")
-                        
-                        # 处理消息
-                        if topic in self.handler_map:
-                            try:
-                                # 创建数据库会话
-                                db = SessionLocal()
-                                try:
-                                    await self.handler_map[topic](value, db)
-                                finally:
-                                    db.close()
-                            except Exception as e:
-                                logger.error(f"处理消息时发生错误: {str(e)}")
-                except Exception as e:
-                    logger.error(f"消费消息时发生错误: {str(e)}")
-                    
-                    # 如果出错，等待一秒后重试
+        """消费循环，处理消息，增加了自动重连功能"""
+        while not self.should_stop:
+            try:
+                if not self.running or not self.consumer:
                     await asyncio.sleep(1)
-        finally:
-            await self.stop()
+                    continue
+                    
+                # 获取消息
+                async for message in self.consumer:
+                    if self.should_stop:
+                        break
+                        
+                    topic = message.topic
+                    value = message.value
+                    
+                    logger.debug(f"收到来自主题 {topic} 的消息: {value}")
+                    
+                    # 处理消息
+                    if topic in self.handler_map:
+                        try:
+                            # 创建数据库会话
+                            db = SessionLocal()
+                            try:
+                                await self.handler_map[topic](value, db)
+                            finally:
+                                db.close()
+                        except Exception as e:
+                            logger.error(f"处理消息时发生错误: {str(e)}")
+                
+            except KafkaConnectionError as e:
+                if self.should_stop:
+                    break
+                    
+                logger.error(f"Kafka连接中断: {str(e)}")
+                logger.info(f"将在 {self.reconnect_delay} 秒后尝试重新连接...")
+                
+                # 标记为未运行
+                self.running = False
+                
+                # 关闭当前消费者
+                try:
+                    if self.consumer:
+                        await self.consumer.stop()
+                        self.consumer = None
+                except Exception:
+                    pass
+                    
+                # 等待一段时间后重新连接
+                await asyncio.sleep(self.reconnect_delay)
+                
+                # 指数退避策略
+                self.reconnect_delay = min(self.reconnect_delay * 2, self.max_reconnect_delay)
+                
+                # 尝试重新连接
+                await self.start(max_retries=-1)  # 无限重试
+                
+            except Exception as e:
+                logger.error(f"消费消息时发生错误: {str(e)}")
+                
+                # 如果出错，等待一秒后重试
+                await asyncio.sleep(1)
     
     async def stop(self):
         """停止消费者"""
@@ -89,7 +153,12 @@ class KafkaConsumer:
         self.running = False
         
         if self.consumer is not None:
-            await self.consumer.stop()
+            try:
+                await self.consumer.stop()
+            except Exception as e:
+                logger.error(f"停止Kafka消费者时发生错误: {str(e)}")
+                
+            self.consumer = None
             logger.info("Kafka 消费者已停止")
 
 

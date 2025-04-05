@@ -1,3 +1,6 @@
+# app/main.py
+
+import asyncio
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 import time
@@ -6,6 +9,7 @@ from app.api import api_router
 from app.core.config import settings
 from app.utils.logging import setup_logging
 from app.events.kafka_producer import kafka_producer
+from app.utils.elasticsearch import es_service
 
 # 设置日志
 logger = setup_logging()
@@ -49,9 +53,9 @@ async def add_process_time_header(request: Request, call_next):
     
     return response
 
-# 健康检查路由
+# 健康检查路由 (根路径)
 @app.get("/health")
-def health_check():
+def root_health_check():
     return {"status": "UP"}
 
 @app.get("/")
@@ -62,13 +66,27 @@ def root():
 @app.on_event("startup")
 async def startup_event():
     logger.info("服务启动中...")
+    
+    # 启动Kafka生产者
     await kafka_producer.start()
+    
+    # 连接到Elasticsearch
+    await es_service.connect()
+    if es_service.is_ready:
+        logger.info("Elasticsearch连接成功")
+    else:
+        logger.warning("无法连接到Elasticsearch，搜索功能将不可用")
 
 # 关闭事件
 @app.on_event("shutdown")
 async def shutdown_event():
     logger.info("服务关闭中...")
+    
+    # 停止Kafka生产者
     await kafka_producer.stop()
+    
+    # 关闭Elasticsearch连接
+    await es_service.close()
 
 # 如果直接运行此脚本，则启动应用
 if __name__ == "__main__":

@@ -16,6 +16,14 @@ RUN apt-get update \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# 添加启动脚本
+COPY start.sh .
+RUN chmod 755 start.sh && \
+    ls -la start.sh && \
+    apt-get update && \
+    apt-get install -y netcat-openbsd postgresql-client curl && \
+    apt-get clean
+
 # 复制项目文件
 COPY . .
 
@@ -23,4 +31,5 @@ COPY . .
 EXPOSE 8000
 
 # 启动命令
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["/bin/bash", "/app/start.sh"]

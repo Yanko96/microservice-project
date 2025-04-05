@@ -1,10 +1,12 @@
+# app/main.py - 更新后的文件
+
 import asyncio
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 import time
 import logging
 
-from app.api import api_router
+from app.api.api_router import api_router  # 确保从正确的地方导入api_router
 from app.core.config import settings
 from app.events.kafka_consumer import kafka_consumer
 from app.websockets.broadcaster import init_redis, close_redis, subscribe_to_channel
@@ -53,7 +55,16 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 # 健康检查路由
 @app.get("/health")
 def health_check():
-    return {"status": "UP"}
+    """
+    健康检查端点，用于Docker的健康检查
+    """
+    # 返回额外的Kafka状态信息
+    kafka_status = "UP" if kafka_consumer.running else "DOWN (服务仍可用)"
+    return {
+        "status": "UP",
+        "kafka": kafka_status,
+        "timestamp": time.time()
+    }
 
 @app.get("/")
 def root():
@@ -64,14 +75,16 @@ def root():
 async def startup_event():
     logger.info("服务启动中...")
     
-    # 初始化Redis连接
-    await init_redis()
+    # 初始化Redis连接 (异步但不等待完成)
+    asyncio.create_task(init_redis())
     
-    # 订阅Redis通知频道
-    await subscribe_to_channel(settings.REDIS_CHANNEL)
+    # 订阅Redis通知频道 (异步但不等待完成)
+    asyncio.create_task(subscribe_to_channel(settings.REDIS_CHANNEL))
     
-    # 启动Kafka消费者
-    await kafka_consumer.start()
+    # 启动Kafka消费者 (异步但不等待完成)
+    # 只尝试5次，如果还是失败，让服务继续运行
+    asyncio.create_task(kafka_consumer.start(max_retries=5))
+    logger.info("服务启动完成 - 后台任务仍在运行")
 
 # 关闭事件
 @app.on_event("shutdown")
@@ -83,6 +96,8 @@ async def shutdown_event():
     
     # 停止Kafka消费者
     await kafka_consumer.stop()
+    
+    logger.info("服务已安全关闭")
 
 # 如果直接运行此脚本，则启动应用
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ post_tag_association = Table(
     'post_tag',
     Base.metadata,
     Column('post_id', Integer, ForeignKey('posts.id'), primary_key=True),
-    Column('tag_name', String, primary_key=True)
+    Column('tag_name', String, ForeignKey('tags.name'), primary_key=True)  # 👈 加上这行
 )
 
 # 帖子媒体类型枚举
