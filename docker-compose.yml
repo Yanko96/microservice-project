@@ -17,6 +17,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./docker-config/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
     networks:
       - app_network
     healthcheck:  # ✅ 确保 PostgreSQL 可用
@@ -127,7 +128,7 @@ services:
     container_name: user-service
     restart: always
     environment:
-      - DATABASE_URL=postgresql://admin:password@postgres:5432/social_platform
+      - DATABASE_URL=postgresql://admin:password@postgres:5432/social_platform_users
       - SECRET_KEY=mysecretkey
       - ALGORITHM=HS256
       - ACCESS_TOKEN_EXPIRE_MINUTES=1440
@@ -170,7 +171,7 @@ services:
     container_name: post-service
     restart: always
     environment:
-      - DATABASE_URL=postgresql://admin:password@postgres:5432/social_platform
+      - DATABASE_URL=postgresql://admin:password@postgres:5432/social_platform_posts
       - API_V1_STR=/api/v1
       - JWT_SECRET_KEY=mysecretkey
       - JWT_ALGORITHM=HS256
@@ -220,7 +221,7 @@ services:
     container_name: notification-service
     restart: always
     environment:
-      - DATABASE_URL=postgresql://admin:password@postgres:5432/social_platform
+      - DATABASE_URL=postgresql://admin:password@postgres:5432/social_platform_notifications
       - API_V1_STR=/api/v1
       - JWT_SECRET_KEY=mysecretkey
       - JWT_ALGORITHM=HS256
