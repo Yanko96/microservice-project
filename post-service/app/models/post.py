@@ -25,9 +25,9 @@ media_type_enum = PgEnum(MediaType, name="mediatype", create_type=False)
 
 # 帖子可见性枚举
 class Visibility(str, enum.Enum):
-    PUBLIC = "public"      # 所有人可见
-    FOLLOWERS = "followers" # 仅关注者可见
-    PRIVATE = "private"    # 仅自己可见
+    PUBLIC = "PUBLIC"      # 所有人可见
+    FOLLOWERS = "FOLLOWERS" # 仅关注者可见
+    PRIVATE = "PRIVATE"    # 仅自己可见
 
 visibility_enum = PgEnum(Visibility, name="visibility", create_type=False)
 

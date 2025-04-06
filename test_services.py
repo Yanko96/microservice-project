@@ -199,7 +199,7 @@ class ServiceTester:
             # 使用表单数据发送到新的文本帖子端点
             form_data = {
                 "content": post_content,
-                "visibility": "public",
+                "visibility": "PUBLIC",
                 "tag_names": "test,automation"
             }
             response = requests.post(
@@ -241,7 +241,7 @@ class ServiceTester:
             }
             
             form_data = {
-                'visibility': 'public',
+                'visibility': 'PUBLIC',
                 'tag_names': 'test,media,image'
             }
             

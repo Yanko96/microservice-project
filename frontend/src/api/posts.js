@@ -24,6 +24,8 @@ export const fetchPostById = async (postId) => {
 
 // 创建新帖子 - 纯文本
 export const createPost = async (postData) => {
+  console.log('[创建帖子] payload:', JSON.stringify(postData, null, 2));
+  
   try {
     const formData = new FormData();
     formData.append('content', postData.content);
@@ -32,18 +34,27 @@ export const createPost = async (postData) => {
     if (postData.location) {
       formData.append('location', postData.location);
     }
-    
+
     if (postData.tag_names) {
       formData.append('tag_names', postData.tag_names);
     }
-    
-    const response = await api.post('/posts/text', formData);
+    for (let pair of formData.entries()) {
+      console.log(pair[0] + ': ' + pair[1]);
+    }
+
+    const response = await api.post('/posts/text', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    });
+
     return response.data;
   } catch (error) {
     console.error('Error creating post:', error);
     throw error;
   }
 };
+
 
 // 创建新帖子 - 带媒体文件
 export const createMediaPost = async (postData, files) => {

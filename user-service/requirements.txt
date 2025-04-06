@@ -45,3 +45,4 @@ python-magic>=0.4.27
 
 # Testing
 pytest>=7.3.0
+prometheus-fastapi-instrumentator

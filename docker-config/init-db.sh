@@ -17,4 +17,7 @@ psql -U admin -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'social
 psql -U admin -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'social_platform_notifications'" | grep -q 1 || \
   psql -U admin -d postgres -c "CREATE DATABASE social_platform_notifications"
 
+psql -U admin -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'grafana'" | grep -q 1 || \
+  psql -U admin -d postgres -c "CREATE DATABASE grafana"
+
 echo "✅ All databases created successfully"

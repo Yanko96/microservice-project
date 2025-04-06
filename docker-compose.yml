@@ -80,9 +80,11 @@ services:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.2.0
     container_name: elasticsearch
     environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=false
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    - discovery.type=single-node
+    - xpack.security.enabled=false
+    - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    - cluster.routing.allocation.disk.threshold_enabled=false  # 添加此行
+    - bootstrap.memory_lock=true  # 添加此行
     ports:
       - "9200:9200"
     volumes:
@@ -90,7 +92,7 @@ services:
     networks:
       - app_network
     healthcheck:
-      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -v red"]
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -E '\"status\":\"(yellow|green)\"'"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -162,14 +164,24 @@ services:
     volumes:
       - grafana_data:/var/lib/grafana
       - ./docker-config/grafana/provisioning:/etc/grafana/provisioning
+      - ./docker-config/grafana/provisioning/dashboards:/var/lib/grafana/dashboards
     environment:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_DATABASE_TYPE=postgres
+      - GF_DATABASE_HOST=postgres:5432
+      - GF_DATABASE_NAME=grafana
+      - GF_DATABASE_USER=admin
+      - GF_DATABASE_PASSWORD=password
     ports:
       - "3000:3000"
     depends_on:
-      - prometheus
+      postgres:
+        condition: service_healthy
+      prometheus:
+        condition: service_healthy
+
     networks:
       - app_network
     healthcheck:
@@ -179,7 +191,9 @@ services:
       retries: 3
 
   fluentd:
-    image: fluent/fluentd:v1.16-1
+    build:
+      context: ./docker-config/fluentd
+      dockerfile: Dockerfile
     container_name: fluentd
     volumes:
       - ./docker-config/fluentd/conf:/fluentd/etc
@@ -189,7 +203,9 @@ services:
     networks:
       - app_network
     depends_on:
-      - elasticsearch
+      elasticsearch:
+        condition: service_healthy
+
     healthcheck:
       test: ["CMD-SHELL", "ps aux | grep fluentd | grep -v grep"]
       interval: 30s
@@ -210,29 +226,34 @@ services:
         condition: service_healthy
       notification-service:
         condition: service_healthy
+      fluentd:
+        condition: service_healthy
     networks:
       - app_network
     logging:
       driver: "fluentd"
       options:
-        fluentd-address: localhost:24224
+        fluentd-address: fluentd:24224
         tag: nginx.access
+        fluentd-async-connect: "true"   # 👈 核心参数
+        fluentd-retry-wait: "5s"
+        fluentd-max-retries: "10"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/health"]
       interval: 10s
       timeout: 5s
       retries: 3
 
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: frontend
-    restart: always
-    depends_on:
-      - nginx
-    networks:
-      - app_network
+  # frontend:
+  #   build:
+  #     context: ./frontend
+  #     dockerfile: Dockerfile
+  #   container_name: frontend
+  #   restart: always
+  #   depends_on:
+  #     - nginx
+  #   networks:
+  #     - app_network
 
   user-service:
     build:
@@ -270,6 +291,8 @@ services:
         condition: service_started
       minio:
         condition: service_healthy
+      fluentd:
+        condition: service_healthy
     networks:
       - app_network
     healthcheck:
@@ -279,8 +302,11 @@ services:
     logging:
       driver: "fluentd"
       options:
-        fluentd-address: localhost:24224
+        fluentd-address: fluentd:24224
         tag: user.service
+        fluentd-async-connect: "true"   # 👈 核心参数
+        fluentd-retry-wait: "5s"
+        fluentd-max-retries: "10"
 
   post-service:
     build:
@@ -325,6 +351,8 @@ services:
         condition: service_started
       user-service:
         condition: service_healthy
+      fluentd:
+        condition: service_healthy
     networks:
       - app_network
     healthcheck:
@@ -334,8 +362,11 @@ services:
     logging:
       driver: "fluentd"
       options:
-        fluentd-address: localhost:24224
+        fluentd-address: fluentd:24224
         tag: post.service
+        fluentd-async-connect: "true"   # 👈 核心参数
+        fluentd-retry-wait: "5s"
+        fluentd-max-retries: "10"
 
   notification-service:
     build:
@@ -370,6 +401,8 @@ services:
         condition: service_started
       user-service:
         condition: service_healthy
+      fluentd:
+        condition: service_healthy
     networks:
       - app_network
     healthcheck:
@@ -379,8 +412,12 @@ services:
     logging:
       driver: "fluentd"
       options:
-        fluentd-address: localhost:24224
+        fluentd-address: fluentd:24224
         tag: notification.service
+        fluentd-async-connect: "true"   # 👈 核心参数
+        fluentd-retry-wait: "5s"
+        fluentd-max-retries: "10"
+        
 
 volumes:
   postgres_data:

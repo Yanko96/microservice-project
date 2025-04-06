@@ -4,6 +4,7 @@ import asyncio
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 import time
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from app.api import api_router
 from app.core.config import settings
@@ -18,7 +19,10 @@ logger = setup_logging()
 app = FastAPI(
     title=settings.PROJECT_NAME,
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    docs_url="/docs",  # ✅ 显式开启 Swagger UI
 )
+
+Instrumentator().instrument(app).expose(app)
 
 # 设置 CORS
 if settings.CORS_ORIGINS:
