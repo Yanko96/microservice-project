@@ -8,6 +8,8 @@ from alembic import context
 # 导入所有模型，以便Alembic能够检测到所有的模型变更
 from app.db.base import Base
 from app.core.config import settings
+from app import models  # 👈 添加这一行来确保 Follow 模型被加载
+
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

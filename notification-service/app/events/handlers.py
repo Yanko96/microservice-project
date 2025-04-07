@@ -23,6 +23,16 @@ async def handle_notification(data: Dict[str, Any], db: Session) -> Optional[Not
         创建的通知对象，如果失败则返回None
     """
     try:
+        if data.get("type") == "follow" and "user_id" not in data:
+            # 将 followee_id 作为 user_id（接收者），follower_id 作为 sender
+            data["user_id"] = data["followee_id"]
+            data["sender_id"] = data["follower_id"]
+            data["title"] = "你有一个新粉丝"
+            data["body"] = f"用户 {data['follower_id']} 关注了你"
+            # 可选添加 sender_name/sender_avatar：如果后续优化
+            data["resource_type"] = "user"
+            data["resource_id"] = data["follower_id"]
+
         # 创建通知
         notification_data = NotificationCreate(
             user_id=data["user_id"],

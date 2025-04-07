@@ -566,6 +566,65 @@ class ServiceTester:
         
         return True
     
+    def test_follow_unfollow(self):
+        """测试关注和取关功能"""
+        self.log("\n===== 测试关注与取关 =====")
+
+        # 注册另一个用户作为被关注者
+        self.log("注册另一个测试用户以进行关注测试...")
+        another_user = self.generate_random_user()
+        try:
+            response = requests.post(
+                f"{self.base_url}/api/v1/auth/register",
+                json=another_user
+            )
+            self.assert_test(response.status_code == 200, "另一个用户注册成功")
+            another_user_id = response.json()["id"]
+        except Exception as e:
+            self.assert_test(False, f"另一个用户注册失败: {str(e)}")
+            return
+
+        # 当前用户关注另一个用户
+        self.log("执行关注操作...")
+        try:
+            headers = {"Authorization": f"Bearer {self.token}"}
+            response = requests.post(
+                f"{self.base_url}/api/v1/users/{another_user_id}/follow",
+                headers=headers
+            )
+            self.assert_test(response.status_code == 201, "关注用户成功")
+        except Exception as e:
+            self.assert_test(False, f"关注用户失败: {str(e)}")
+            return
+
+        # 获取关注列表
+        self.log("验证关注列表...")
+        try:
+            headers = {"Authorization": f"Bearer {self.token}"}
+            response = requests.get(
+                f"{self.base_url}/api/v1/users/{self.user_id}/following",
+                headers=headers
+            )
+            success = self.assert_test(response.status_code == 200, "获取关注列表成功")
+            if success:
+                ids = response.json().get("following", [])
+                self.assert_test(another_user_id in ids, "已关注目标用户")
+        except Exception as e:
+            self.assert_test(False, f"获取关注列表失败: {str(e)}")
+
+        # 取消关注
+        self.log("执行取消关注操作...")
+        try:
+            headers = {"Authorization": f"Bearer {self.token}"}
+            response = requests.delete(
+                f"{self.base_url}/api/v1/users/{another_user_id}/unfollow",
+                headers=headers
+            )
+            self.assert_test(response.status_code == 200, "取消关注成功")
+        except Exception as e:
+            self.assert_test(False, f"取消关注失败: {str(e)}")
+
+    
     def run_all_tests(self):
         """运行所有测试"""
         self.log("开始测试微服务...", "INFO")
@@ -581,6 +640,8 @@ class ServiceTester:
             
             # 测试通知服务
             self.test_notification_service()
+
+            self.test_follow_unfollow()
         
         # 显示测试结果摘要
         self.log("\n===== 测试结果摘要 =====")

@@ -13,7 +13,7 @@ logger = setup_logging()
 app = FastAPI(
     title=settings.PROJECT_NAME,
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
-    docs_url="/docs",  # ✅ 显式开启 Swagger UI
+    docs_url=f"{settings.API_V1_STR}/docs"
 )
 
 Instrumentator().instrument(app).expose(app)
